@@ -80,70 +80,130 @@ def baby_step_giant_step(a, b, n, details=False, sets_display=False):
     return None
 
 
-from math import gcd
+# === ALGORYTM POHLIGA–HELLMANA (zgodny z SageMath) ===
 from sympy import factorint
 from sympy.ntheory.modular import crt
 
-def power_mod(a, b, n):
-    """Oblicza a^b mod n efektywnie"""
-    return pow(a, b, n)
-
-def discrete_log(b, a, n):
-    """Oblicza dyskretny logarytm b = a^x mod n (naive implementation)"""
-    # Uwaga: To jest naiwna implementacja, działająca tylko dla małych wartości
-    # W SageMath używa się bardziej zaawansowanych algorytmów
-    m = int(n ** 0.5) + 1
-    table = {pow(a, j, n): j for j in range(m)}
-    
-    a_m = pow(a, m * (n - 2), n)  # a^(-m) mod n using Fermat's little theorem
-    
-    for i in range(m):
-        y = (b * pow(a_m, i, n)) % n
-        if y in table:
-            return i * m + table[y]
-    return None
-
 def pohlig_hellman_algorithm(a, b, n, details=False):
+    """
+    Algorytm Pohliga–Hellmana zgodny z wersją SageMath.
+    Obsługuje poprawnie przypadki p^e z e > 1, budując rozwiązania iteracyjnie.
+    """
     if details:
-        print(f"Zagadnienie: {a}^x = {b} (mod {n}), można zastąpić przez: \n")
-    
-    # Factorize n-1
-    factors = factorint(n-1)
-    fa = [(p, e) for p, e in factors.items()]
-    fl = len(fa)
-    
-    x = []
-    y = []
-    p_list = []
-    e_list = []
-    
-    for i in range(fl):
-        p = fa[i][0]
-        e = fa[i][1]
-        np = (n-1) // (p**e)
-        bp = power_mod(b, np, n)
-        ap = power_mod(a, np, n)
-        
-        disc = discrete_log(bp, ap, n)
-        
-        p_list.append(p)
-        e_list.append(e)
-        x.append(disc)
-        y.append(p**e)
-        
+        print(f"Zagadnienie: {a}^x = {b} (mod {n}), można zastąpić przez:\n")
+
+    factors = factorint(n - 1)
+    x_list = []
+    mod_list = []
+
+    for p, e in factors.items():
+        pe = p ** e
+        x_pe = 0
+        a_inv = modinv(a, n)
+
+        for k in range(e):
+            exp = (n - 1) // (p ** (k + 1))
+
+            a_k = pow(a, exp, n)
+            b_k = pow(b * pow(a_inv, x_pe, n), exp, n)
+
+            d_k = baby_step_giant_step(a_k, b_k, n)
+            if d_k is None:
+                raise ValueError(f"Nie udało się rozwiązać logarytmu dyskretnego mod {p}^{k+1}")
+
+            x_pe += d_k * (p ** k)
+
+        x_list.append(x_pe)
+        mod_list.append(pe)
+
         if details:
-            print(f"{ap}^x({p}) = {bp} (mod {n}) z rozwiązaniem x({p}) = {disc}")
-    
+            print(f"x ≡ {x_pe} (mod {pe})")
+
+    result, _ = crt(mod_list, x_list)
+    x_final = int(result % (n - 1))
+
     if details:
         print("\nZgodnie z twierdzeniem:")
-        for i in range(fl):
-            print(f"x = {x[i]} (mod {p_list[i]}^{e_list[i]})")
-        
-        # Oblicz wynik końcowy
-        moduli = [p**e for p, e in zip(p_list, e_list)]
-        result = crt(moduli, x)[0]
-        print(f"\nWynik końcowy: x = {result}")
-    
-    # Oblicz wynik końcowy za pomocą Chińskiego Twierdzenia o Resztach
-    moduli = [p**e for p, e in zip(p_list, e_list)]
-    return crt(moduli, x)[0]
+        for i in range(len(x_list)):
+            print(f"x = {x_list[i]} (mod {mod_list[i]})")
+        print(f"\nWynik końcowy: x = {x_final}")
+
+    return x_final
+
+
+# === ALGORYTM RHO POLLARDA ===
+import random
+import time
+from math import gcd
+
+def extended_gcd(a, b):
+    if b == 0:
+        return a, 1, 0
+    else:
+        g, x, y = extended_gcd(b, a % b)
+        return g, y, x - (a // b) * y
+
+def pollard_rho_dlog(a, b, n, details=False):
+    start_time = time.time()
+    N = n - 1
+
+    while True:
+        e, f = 0, random.randint(0, N - 1)
+        x = pow(b, f, n)
+
+        tortoise = (e, f, x)
+        hare = (e, f, x)
+
+        def iterate(state):
+            e, f, x = state
+            if x % 3 == 1:
+                return ((e + 1) % N, f, a * x % n)
+            elif x % 3 == 2:
+                return ((2 * e) % N, (2 * f) % N, x * x % n)
+            else:
+                return (e, (f + 1) % N, b * x % n)
+
+        for _ in range(1, N * 2):
+            tortoise = iterate(tortoise)
+            hare = iterate(iterate(hare))
+
+            if tortoise[2] == hare[2]:
+                break
+
+        ei, fi, _ = tortoise
+        ej, fj, _ = hare
+
+        s = (ei - ej) % N
+        t = (fj - fi) % N
+
+        g, v, w = extended_gcd(s, N)
+        if g == 0:
+            continue
+
+        try:
+            x0 = (v * t // g) % N
+        except:
+            continue
+
+        candidates = [(x0 + k * (N // g)) % N for k in range(g)]
+        for x in candidates:
+            if pow(a, x, n) == b % n:
+                elapsed = round(time.time() - start_time, 5)
+                if details:
+                    print("Algorytm rho Pollarda:\n")
+                    print(f"Powtórzenie dla x = {tortoise[2]}")
+                    print(f"e_i = {ei}, f_i = {fi}")
+                    print(f"e_j = {ej}, f_j = {fj}")
+                    print("")
+                    print(f"Równanie: ({ei} - {ej})x ≡ {fj} - {fi} (mod {N})")
+                    print("")
+                    print(f"Rozwiązujemy: {s}x ≡ {t} (mod {N})")
+                    print(f"NWD({s}, {N}) = {g}, v = {v}, w = {w}")
+                    print("")
+                    print("Rozwiązanie: x ≡", f"{v}*{t}//{g} mod {N}")
+                    print("")
+                    print(f"Kandydaci: {candidates}")
+                    print(f"Wybrany logarytm x = {x}")
+                return x
+
+        continue

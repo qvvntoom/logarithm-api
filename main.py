@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
-from log_functions import brute_force_method, baby_step_giant_step, pohlig_hellman_algorithm
+from log_functions import brute_force_method, baby_step_giant_step, pohlig_hellman_algorithm, pollard_rho_dlog
 
 import io
 import sys
@@ -9,7 +9,7 @@ import time
 app = FastAPI()
 
 class LogInput(BaseModel):
-    method: str  # 'brute', 'bsgs', 'pohlig'
+    method: str  # 'brute', 'bsgs', 'pohlig', 'rho'
     a: int
     b: int
     n: int
@@ -31,6 +31,8 @@ def compute_log(data: LogInput):
             x = baby_step_giant_step(data.a, data.b, data.n, details=data.details)
         elif data.method == "pohlig":
             x = pohlig_hellman_algorithm(data.a, data.b, data.n, details=data.details)
+        elif data.method == "rho":
+            x = pollard_rho_dlog(data.a, data.b, data.n, details=data.details)
         else:
             sys.stdout = sys_stdout_original
             return {"error": "Nieznana metoda"}
@@ -48,5 +50,3 @@ def compute_log(data: LogInput):
         "time": elapsed,
         "log": logs
     }
-
-
